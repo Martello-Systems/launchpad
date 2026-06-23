@@ -10,7 +10,13 @@ function maskEmail(email: string): string {
   return `${user.slice(0, 1)}${"*".repeat(Math.max(2, user.length - 1))}@${domain}`;
 }
 
-export default async function Home() {
+export default async function Home({
+  searchParams,
+}: {
+  searchParams: Promise<{ verified?: string }>;
+}) {
+  const { verified } = await searchParams;
+
   // Best-effort: if the DB isn't reachable at render time, still show the form.
   let total = 0;
   let board: Awaited<ReturnType<typeof leaderboard>> = [];
@@ -22,6 +28,16 @@ export default async function Home() {
 
   return (
     <main className="mx-auto flex min-h-screen max-w-xl flex-col justify-center gap-10 px-6 py-16">
+      {verified === "1" && (
+        <div className="rounded-lg bg-green-50 p-4 text-center text-sm text-green-800">
+          Email confirmed — you&apos;re officially on the waitlist. 🎉
+        </div>
+      )}
+      {verified === "error" && (
+        <div className="rounded-lg bg-red-50 p-4 text-center text-sm text-red-700">
+          That confirmation link is invalid or has already been used.
+        </div>
+      )}
       <header className="space-y-3 text-center">
         <h1 className="text-4xl font-bold tracking-tight">Join the waitlist</h1>
         <p className="text-neutral-600">

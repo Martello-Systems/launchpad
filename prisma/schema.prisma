@@ -11,13 +11,16 @@ datasource db {
 }
 
 model Waitlist {
-  id           String   @id @default(cuid())
-  email        String   @unique
-  referralCode String   @unique
+  id           String    @id @default(cuid())
+  email        String    @unique
+  referralCode String    @unique
   position     Int
-  verified     Boolean  @default(false)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  verified     Boolean   @default(false)
+  // Double-opt-in: a single-use token emailed at signup; cleared on verify.
+  verifyToken  String?   @unique
+  verifiedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   // Self-referential attribution: who referred this signup.
   referredById String?

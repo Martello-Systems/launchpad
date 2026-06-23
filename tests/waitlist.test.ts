@@ -1,3 +1,9 @@
+// These tests exercise the core position/referral/leaderboard math with email
+// verification DISABLED, so every signup is created verified and referrals
+// count immediately. The double-opt-in flow (verification ON) has its own
+// dedicated suite in verification.test.ts.
+process.env.REQUIRE_EMAIL_VERIFICATION = "false";
+
 import { describe, it, expect, beforeEach, afterAll } from "vitest";
 import { prisma, resetDb, MockMailer } from "./helpers";
 import {
@@ -11,6 +17,8 @@ import {
 } from "../lib/waitlist";
 
 beforeEach(async () => {
+  // Re-assert per-test so a sibling suite that flips this env can't bleed in.
+  process.env.REQUIRE_EMAIL_VERIFICATION = "false";
   await resetDb();
 });
 

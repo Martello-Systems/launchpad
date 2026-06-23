@@ -7,6 +7,7 @@ interface SignupSuccess {
   referralCode: string;
   position: number;
   referralLink: string;
+  pendingVerification?: boolean;
 }
 
 export default function SignupForm({ compact = false }: { compact?: boolean }) {
@@ -67,6 +68,12 @@ export default function SignupForm({ compact = false }: { compact?: boolean }) {
           <p className="text-sm">
             Your position: <strong>#{result.position}</strong>
           </p>
+          {result.pendingVerification && (
+            <p className="mt-2 text-sm">
+              Check your inbox and click the link to confirm your email. Your
+              referrals only count once you&apos;re confirmed.
+            </p>
+          )}
         </div>
         <div className="space-y-2">
           <p className="text-sm text-neutral-600">

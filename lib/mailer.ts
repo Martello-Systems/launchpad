@@ -1,7 +1,7 @@
 // Mailer interface so the core logic never depends on a concrete provider.
 // Tests inject a mock; production uses the Resend-backed implementation.
 
-import { getEmailFrom, referralLink } from "./config";
+import { getAppUrl, getEmailFrom, referralLink } from "./config";
 
 export interface MailMessage {
   to: string;
@@ -90,6 +90,32 @@ Your code: ${params.referralCode}`;
   <p>Share your referral link to move up the list:</p>
   <p><a href="${link}">${link}</a></p>
   <p style="color:#666">Your code: <code>${params.referralCode}</code></p>
+</div>`;
+  return { to: params.email, subject, html, text };
+}
+
+export function verifyLink(token: string): string {
+  return `${getAppUrl()}/api/verify?token=${encodeURIComponent(token)}`;
+}
+
+export function buildVerificationEmail(params: {
+  email: string;
+  verifyToken: string;
+}): MailMessage {
+  const link = verifyLink(params.verifyToken);
+  const subject = "Confirm your spot on the waitlist";
+  const text = `Almost there! Confirm your email to lock in your spot on the waitlist.
+
+Click to confirm:
+${link}
+
+If you didn't request this, you can ignore this email.`;
+  const html = `<div style="font-family:sans-serif;max-width:480px">
+  <h2>Confirm your email</h2>
+  <p>Almost there! Click below to lock in your spot on the waitlist.</p>
+  <p><a href="${link}" style="display:inline-block;background:#111;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none">Confirm my spot</a></p>
+  <p style="color:#666;font-size:13px">Or paste this link: <br><a href="${link}">${link}</a></p>
+  <p style="color:#999;font-size:12px">If you didn't request this, you can ignore this email.</p>
 </div>`;
   return { to: params.email, subject, html, text };
 }

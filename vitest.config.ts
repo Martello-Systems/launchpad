@@ -1,6 +1,14 @@
 import { defineConfig } from "vitest/config";
+import { fileURLToPath } from "node:url";
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      // Mirror the tsconfig "@/*" path alias so tests can import app modules
+      // (e.g. middleware.ts) the same way Next.js does.
+      "@": fileURLToPath(new URL(".", import.meta.url)),
+    },
+  },
   test: {
     globals: true,
     environment: "node",

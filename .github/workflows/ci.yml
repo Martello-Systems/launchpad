@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: launchpad
+          POSTGRES_PASSWORD: launchpad
+          POSTGRES_DB: launchpad_test
+        ports:
+          - 5432:5432
+        # Wait until Postgres is healthy before the steps run.
+        options: >-
+          --health-cmd "pg_isready -U launchpad"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      # Both point at the CI Postgres service. Tests reset/migrate the test DB.
+      DATABASE_URL: postgresql://launchpad:launchpad@localhost:5432/launchpad_test?schema=public
+      TEST_DATABASE_URL: postgresql://launchpad:launchpad@localhost:5432/launchpad_test?schema=public
+      # Public URL used to build referral/verify links during build & tests.
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npm run prisma:generate
+
+      - name: Apply database migrations
+        run: npm run prisma:migrate
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build
+        run: npm run build

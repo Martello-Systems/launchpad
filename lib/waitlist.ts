@@ -13,15 +13,20 @@
 
 import type { PrismaClient, Waitlist } from "@prisma/client";
 import { generateReferralCode } from "./referral-code";
-import { POSITION_BOOST_PER_REFERRAL, getMilestoneThreshold } from "./config";
+import {
+  POSITION_BOOST_PER_REFERRAL,
+  getMilestoneThreshold,
+  isEmailVerificationEnabled,
+} from "./config";
 import {
   buildConfirmationEmail,
   buildMilestoneEmail,
+  buildVerificationEmail,
   type Mailer,
 } from "./mailer";
 
 export class WaitlistError extends Error {
-  code: "DUPLICATE_EMAIL" | "INVALID_EMAIL" | "NOT_FOUND";
+  code: "DUPLICATE_EMAIL" | "INVALID_EMAIL" | "NOT_FOUND" | "INVALID_TOKEN";
   constructor(code: WaitlistError["code"], message: string) {
     super(message);
     this.code = code;
@@ -36,6 +41,9 @@ export interface SignupResult {
   basePosition: number;
   position: number; // effective (boosted) position
   referredById: string | null;
+  verified: boolean;
+  /** True when a verification email was issued and the entry is pending. */
+  pendingVerification: boolean;
   createdAt: Date;
 }
 
@@ -99,6 +107,13 @@ export async function signup(
 
   const code = await generateUniqueCode(prisma);
 
+  // Double-opt-in: when verification is enabled, the entry starts unverified
+  // with a single-use token and we email a verify link. Referral credit only
+  // counts AFTER verification (see referralCount / leaderboard). When disabled,
+  // entries are created verified and the confirmation email fires immediately.
+  const verificationEnabled = isEmailVerificationEnabled();
+  const verifyToken = verificationEnabled ? generateReferralCode(24) : null;
+
   let created: Waitlist;
   try {
     created = await prisma.$transaction(async (tx) => {
@@ -110,6 +125,9 @@ export async function signup(
           referralCode: code,
           position: basePosition,
           referredById: referrer ? referrer.id : null,
+          verified: !verificationEnabled,
+          verifyToken,
+          verifiedAt: verificationEnabled ? null : new Date(),
         },
       });
     });
@@ -126,28 +144,33 @@ export async function signup(
     throw e;
   }
 
-  // Confirmation email (best-effort; failures must not break signup).
+  // Email step (best-effort; failures must not break signup).
   if (opts.sendEmail && opts.mailer) {
     try {
-      await opts.mailer.send(
-        buildConfirmationEmail({
-          email: created.email,
-          referralCode: created.referralCode,
-          position: created.position,
-        })
-      );
+      if (verificationEnabled && created.verifyToken) {
+        // Send the verify link. Confirmation + milestone fire on verify.
+        await opts.mailer.send(
+          buildVerificationEmail({
+            email: created.email,
+            verifyToken: created.verifyToken,
+          })
+        );
+      } else {
+        // Verification disabled: send the welcome confirmation right away.
+        await opts.mailer.send(
+          buildConfirmationEmail({
+            email: created.email,
+            referralCode: created.referralCode,
+            position: created.position,
+          })
+        );
+        // And credit the referrer's milestone immediately (entry is verified).
+        if (referrer) {
+          await maybeSendMilestone(prisma, referrer.id, opts.mailer);
+        }
+      }
     } catch {
       /* swallow — email is not critical to the signup transaction */
-    }
-  }
-
-  // If this signup was referred, check whether the referrer just hit a
-  // milestone and fire that email (best-effort).
-  if (referrer && opts.sendEmail && opts.mailer) {
-    try {
-      await maybeSendMilestone(prisma, referrer.id, opts.mailer);
-    } catch {
-      /* swallow */
     }
   }
 
@@ -156,15 +179,82 @@ export async function signup(
     email: created.email,
     referralCode: created.referralCode,
     basePosition: created.position,
-    position: created.position, // brand-new signup has 0 referrals
+    position: created.position, // brand-new signup has 0 (verified) referrals
     referredById: created.referredById,
+    verified: created.verified,
+    pendingVerification: verificationEnabled,
     createdAt: created.createdAt,
   };
 }
 
-/** Count of people directly referred by a given entry id. */
+/**
+ * Confirm a signup via its verification token. Marks the entry verified,
+ * clears the single-use token, then (best-effort) sends the welcome
+ * confirmation email and credits the referrer's milestone — because referral
+ * credit only counts verified signups.
+ *
+ * Throws WaitlistError("INVALID_TOKEN") for an unknown/used token. Verifying an
+ * already-verified entry (e.g. a double-clicked link where the token still
+ * matches) is idempotent and does not re-send emails.
+ */
+export async function verifyEmail(
+  prisma: PrismaClient,
+  token: string,
+  opts: { mailer?: Mailer; sendEmail?: boolean } = {}
+): Promise<{ id: string; email: string; alreadyVerified: boolean }> {
+  const trimmed = (token || "").trim();
+  if (!trimmed) {
+    throw new WaitlistError("INVALID_TOKEN", "A verification token is required.");
+  }
+
+  const entry = await prisma.waitlist.findUnique({ where: { verifyToken: trimmed } });
+  if (!entry) {
+    throw new WaitlistError("INVALID_TOKEN", "This verification link is invalid or has expired.");
+  }
+
+  if (entry.verified) {
+    // Token still present but already verified — treat as idempotent success.
+    return { id: entry.id, email: entry.email, alreadyVerified: true };
+  }
+
+  const updated = await prisma.waitlist.update({
+    where: { id: entry.id },
+    data: { verified: true, verifiedAt: new Date(), verifyToken: null },
+  });
+
+  if (opts.sendEmail && opts.mailer) {
+    try {
+      await opts.mailer.send(
+        buildConfirmationEmail({
+          email: updated.email,
+          referralCode: updated.referralCode,
+          position: updated.position,
+        })
+      );
+      // Now that this signup is verified, the referrer may have hit a milestone.
+      if (updated.referredById) {
+        await maybeSendMilestone(prisma, updated.referredById, opts.mailer);
+      }
+    } catch {
+      /* swallow — email is not critical to verification */
+    }
+  }
+
+  return { id: updated.id, email: updated.email, alreadyVerified: false };
+}
+
+/**
+ * Count of VERIFIED people directly referred by a given entry id.
+ *
+ * REFERRAL-CREDIT RULE (documented + tested): a referral only counts once the
+ * referred signup has confirmed their email. Unverified (pending) referrals do
+ * NOT move the referrer up the list or onto the leaderboard. This prevents
+ * gaming the loop with throwaway/unconfirmable addresses. When email
+ * verification is disabled (REQUIRE_EMAIL_VERIFICATION=false), every signup is
+ * created verified, so all referrals count immediately.
+ */
 export async function referralCount(prisma: PrismaClient, id: string): Promise<number> {
-  return prisma.waitlist.count({ where: { referredById: id } });
+  return prisma.waitlist.count({ where: { referredById: id, verified: true } });
 }
 
 /** Fetch a single entry by referral code, with effective position. */
@@ -186,6 +276,8 @@ export async function getEntryByCode(
     basePosition: entry.position,
     position: effectivePosition(entry.position, count),
     referredById: entry.referredById,
+    verified: entry.verified,
+    pendingVerification: !entry.verified,
     createdAt: entry.createdAt,
     referralCount: count,
   };
@@ -208,10 +300,10 @@ export async function leaderboard(
   prisma: PrismaClient,
   limit = 10
 ): Promise<LeaderboardRow[]> {
-  // One grouped query to get referral counts per referrer.
+  // One grouped query to get VERIFIED referral counts per referrer.
   const grouped = await prisma.waitlist.groupBy({
     by: ["referredById"],
-    where: { referredById: { not: null } },
+    where: { referredById: { not: null }, verified: true },
     _count: { referredById: true },
   });
 
@@ -292,7 +384,7 @@ export async function listSignups(
 
   const grouped = await prisma.waitlist.groupBy({
     by: ["referredById"],
-    where: { referredById: { not: null } },
+    where: { referredById: { not: null }, verified: true },
     _count: { referredById: true },
   });
   const counts = new Map<string, number>();
