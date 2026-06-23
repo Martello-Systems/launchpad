@@ -1,0 +1,29 @@
+// Launchpad — Prisma schema
+// A single Waitlist table with self-referential referral attribution.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Waitlist {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  referralCode String   @unique
+  position     Int
+  verified     Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Self-referential attribution: who referred this signup.
+  referredById String?
+  referredBy   Waitlist?  @relation("Referrals", fields: [referredById], references: [id])
+  referrals    Waitlist[] @relation("Referrals")
+
+  @@index([referredById])
+  @@index([position])
+}

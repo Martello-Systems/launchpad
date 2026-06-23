@@ -1,0 +1,67 @@
+import SignupForm from "@/components/SignupForm";
+import { prisma } from "@/lib/prisma";
+import { leaderboard, totalSignups } from "@/lib/waitlist";
+
+export const dynamic = "force-dynamic";
+
+function maskEmail(email: string): string {
+  const [user, domain] = email.split("@");
+  if (!domain) return "***";
+  return `${user.slice(0, 1)}${"*".repeat(Math.max(2, user.length - 1))}@${domain}`;
+}
+
+export default async function Home() {
+  // Best-effort: if the DB isn't reachable at render time, still show the form.
+  let total = 0;
+  let board: Awaited<ReturnType<typeof leaderboard>> = [];
+  try {
+    [total, board] = await Promise.all([totalSignups(prisma), leaderboard(prisma, 5)]);
+  } catch {
+    /* DB not configured yet — page still renders the signup form */
+  }
+
+  return (
+    <main className="mx-auto flex min-h-screen max-w-xl flex-col justify-center gap-10 px-6 py-16">
+      <header className="space-y-3 text-center">
+        <h1 className="text-4xl font-bold tracking-tight">Join the waitlist</h1>
+        <p className="text-neutral-600">
+          Sign up to get early access. Refer friends to jump the line.
+        </p>
+        {total > 0 && (
+          <p className="text-sm text-neutral-500">{total} people already in line.</p>
+        )}
+      </header>
+
+      <section className="rounded-xl border border-neutral-200 bg-white p-6 shadow-sm">
+        <SignupForm />
+      </section>
+
+      {board.length > 0 && (
+        <section className="space-y-3">
+          <h2 className="text-lg font-semibold">Top referrers</h2>
+          <ol className="divide-y divide-neutral-200 overflow-hidden rounded-lg border border-neutral-200 bg-white">
+            {board.map((r, i) => (
+              <li key={r.id} className="flex items-center justify-between px-4 py-2 text-sm">
+                <span>
+                  <span className="mr-2 font-mono text-neutral-400">#{i + 1}</span>
+                  {maskEmail(r.email)}
+                </span>
+                <span className="font-medium">{r.referralCount} referrals</span>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
+
+      <footer className="text-center text-xs text-neutral-400">
+        Powered by{" "}
+        <a
+          href="https://github.com/martello-systems/launchpad"
+          className="underline hover:text-neutral-600"
+        >
+          Launchpad
+        </a>
+      </footer>
+    </main>
+  );
+}
