@@ -1,5 +1,7 @@
 # Launchpad 🚀
 
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE) [![Built by Martello Systems](https://img.shields.io/badge/built%20by-Martello%20Systems-0b0b14)](https://martellosystems.com)
+
 **A self-hosted viral waitlist in a box.** Signup, referral codes with attribution, position tracking + leaderboard, an admin dashboard, an embeddable widget, and email automation — all in one deployable Next.js app. This is the thing you deploy, not a template you assemble.
 
 - **Referral loops built in.** Every signup gets a unique referral link. Each successful (verified) referral moves them up the line.
@@ -185,3 +187,11 @@ MIT © 2026 Martello Systems. See [LICENSE](./LICENSE).
 
 <sub>Built by **Martello Systems** — we design and ship AI-driven software.
 Part of the Martello open-source dev-tools family.</sub>
+
+---
+
+## Built by Martello Systems
+
+`launchpad` is part of the open-source toolkit from **[Martello Systems](https://martellosystems.com)** — we ship AI-built software, spec to delivery in days. If this saved you time, come [see what we do](https://martellosystems.com).
+
+Licensed under the [Apache License 2.0](LICENSE).
