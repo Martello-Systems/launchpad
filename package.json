@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "description": "Self-hosted viral waitlist in a box: signup, referrals, leaderboard, admin, embeddable widget, email automation.",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "scripts": {
     "dev": "next dev",
     "build": "prisma generate && next build",
