@@ -219,9 +219,17 @@ export async function signup(
  * confirmation email and credits the referrer's milestone, because referral
  * credit only counts verified signups.
  *
- * Throws WaitlistError("INVALID_TOKEN") for an unknown/used token. Verifying an
- * already-verified entry (e.g. a double-clicked link where the token still
- * matches) is idempotent and does not re-send emails.
+ * Throws WaitlistError("INVALID_TOKEN") for an unknown token. Verifying an
+ * already-verified entry (e.g. a double-submitted confirm form, or a re-clicked
+ * link where the token still matches) is idempotent: it returns
+ * alreadyVerified=true and does NOT re-send emails.
+ *
+ * SINGLE-USE: the token is "single-use" in the sense that it can only ever flip
+ * an entry from pending -> verified once (the side effects — welcome + milestone
+ * emails — fire exactly once). We deliberately keep the token string on the row
+ * after verifying so a second confirmation request is recognized and handled
+ * idempotently instead of looking like an unknown/expired token. We clear the
+ * EXPIRY on verify so the time-limit no longer applies to a confirmed entry.
  */
 export async function verifyEmail(
   prisma: PrismaClient,
@@ -254,7 +262,8 @@ export async function verifyEmail(
     data: {
       verified: true,
       verifiedAt: new Date(),
-      verifyToken: null,
+      // Keep verifyToken so a repeat confirmation is handled idempotently (see
+      // the `entry.verified` short-circuit above); only the expiry is cleared.
       verifyTokenExpiresAt: null,
     },
   });
@@ -509,4 +518,64 @@ export async function listSignups(
   });
 
   return { total, rows };
+}
+
+/** One exported waitlist record, shaped for the admin CSV. */
+export interface ExportRow {
+  email: string;
+  referralCode: string;
+  verified: boolean;
+  referralCount: number;
+  basePosition: number;
+  position: number;
+  createdAt: Date;
+}
+
+/**
+ * Stream every signup for the admin CSV export, in batches, so the route never
+ * loads the whole table into memory at once. The (bounded) per-referrer verified
+ * counts are fetched once up front via a single grouped query; entries are then
+ * paged with keyset (cursor) pagination on the primary key.
+ */
+export async function* streamSignupsForCsv(
+  prisma: PrismaClient,
+  batchSize = 500
+): AsyncGenerator<ExportRow> {
+  const take = Math.max(1, Math.floor(batchSize));
+
+  // Verified-referral counts per referrer. This is aggregated (one row per
+  // referrer, a subset of the table), so it stays small even for large lists.
+  const grouped = await prisma.waitlist.groupBy({
+    by: ["referredById"],
+    where: { referredById: { not: null }, verified: true },
+    _count: { referredById: true },
+  });
+  const counts = new Map<string, number>();
+  for (const g of grouped) if (g.referredById) counts.set(g.referredById, g._count.referredById);
+
+  let cursor: string | undefined;
+  for (;;) {
+    const batch = await prisma.waitlist.findMany({
+      take,
+      ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
+      orderBy: { id: "asc" },
+    });
+    if (batch.length === 0) break;
+
+    for (const e of batch) {
+      const c = counts.get(e.id) ?? 0;
+      yield {
+        email: e.email,
+        referralCode: e.referralCode,
+        verified: e.verified,
+        referralCount: c,
+        basePosition: e.position,
+        position: effectivePosition(e.position, c),
+        createdAt: e.createdAt,
+      };
+    }
+
+    if (batch.length < take) break;
+    cursor = batch[batch.length - 1].id;
+  }
 }

@@ -16,7 +16,9 @@ model Waitlist {
   referralCode String    @unique
   position     Int
   verified     Boolean   @default(false)
-  // Double-opt-in: a single-use token emailed at signup; cleared on verify.
+  // Double-opt-in: a single-use token emailed at signup. It flips the entry
+  // pending -> verified exactly once; it is retained (not cleared) afterwards so
+  // a repeat confirmation is recognized and handled idempotently. See verifyEmail.
   verifyToken  String?   @unique
   // When the verifyToken stops being valid. A click after this is rejected as
   // expired; signing up again re-issues a fresh token. Null = no token / no TTL.

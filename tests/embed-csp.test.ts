@@ -73,17 +73,53 @@ describe("embedCsp", () => {
   });
 });
 
+// A minimal request stub: the middleware only reads `nextUrl.pathname`.
+function reqFor(pathname: string) {
+  return { nextUrl: { pathname } } as never;
+}
+
 describe("middleware emits the CSP header", () => {
-  it("sets Content-Security-Policy from env", async () => {
+  it("sets the configurable frame-ancestors CSP on /embed from env", async () => {
     const { middleware } = await import("../middleware");
     await withEnvAsync("https://acme.com", async () => {
-      // The middleware ignores its request arg for header-setting, so a minimal
-      // stub is fine.
-      const res = middleware({} as never);
+      const res = middleware(reqFor("/embed"));
       expect(res.headers.get("Content-Security-Policy")).toBe(
         "frame-ancestors 'self' https://acme.com"
       );
+      // The embeddable surface must NOT be DENY-framed.
+      expect(res.headers.get("X-Frame-Options")).toBeNull();
     });
+  });
+
+  it("also applies the configurable CSP to /embed.js", async () => {
+    const { middleware } = await import("../middleware");
+    await withEnvAsync("https://acme.com", async () => {
+      const res = middleware(reqFor("/embed.js"));
+      expect(res.headers.get("Content-Security-Policy")).toBe(
+        "frame-ancestors 'self' https://acme.com"
+      );
+      expect(res.headers.get("X-Frame-Options")).toBeNull();
+    });
+  });
+});
+
+describe("middleware baseline security headers (app-wide)", () => {
+  it("sets nosniff + Referrer-Policy on every route", async () => {
+    const { middleware } = await import("../middleware");
+    for (const p of ["/", "/admin", "/api/signup", "/embed"]) {
+      const res = middleware(reqFor(p));
+      expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
+      expect(res.headers.get("Referrer-Policy")).toBe("strict-origin-when-cross-origin");
+    }
+  });
+
+  it("makes the signup page, /admin, and the API non-frameable", async () => {
+    const { middleware } = await import("../middleware");
+    for (const p of ["/", "/admin", "/api/signup", "/api/admin/export"]) {
+      const res = middleware(reqFor(p));
+      expect(res.headers.get("X-Frame-Options")).toBe("DENY");
+      expect(res.headers.get("Content-Security-Policy")).toBe("frame-ancestors 'none'");
+    }
   });
 });
 

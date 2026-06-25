@@ -1,15 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { listSignups, totalSignups } from "@/lib/waitlist";
+import { streamSignupsForCsv, type ExportRow } from "@/lib/waitlist";
 import { isAdminAuthorized } from "@/lib/auth";
-import { toCsv, type CsvValue } from "@/lib/csv";
+import { csvHeaderLine, csvRowLine, type CsvValue } from "@/lib/csv";
+import { getCsvExportBatchSize } from "@/lib/config";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // Admin-only CSV export of the full waitlist. Same Bearer ADMIN_TOKEN guard as
-// the rest of the admin API. Returns text/csv as a downloadable attachment.
-const COLUMNS: { key: string; header: string }[] = [
+// the rest of the admin API. The body is STREAMED row-by-row (paged from the DB
+// in batches) so the whole table is never held in memory at once, even for a
+// very large list.
+const COLUMNS: { key: keyof ExportRow; header: string }[] = [
   { key: "email", header: "email" },
   { key: "referralCode", header: "referral_code" },
   { key: "verified", header: "verified" },
@@ -24,24 +27,28 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
 
-  // Pull every row (admin export). totalSignups bounds the single page we fetch.
-  const total = await totalSignups(prisma);
-  const { rows } = await listSignups(prisma, { take: total, skip: 0 });
+  const batchSize = getCsvExportBatchSize();
+  const encoder = new TextEncoder();
 
-  const records: Record<string, CsvValue>[] = rows.map((r) => ({
-    email: r.email,
-    referralCode: r.referralCode,
-    verified: r.verified,
-    referralCount: r.referralCount,
-    basePosition: r.basePosition,
-    position: r.position,
-    createdAt: r.createdAt,
-  }));
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      try {
+        controller.enqueue(encoder.encode(csvHeaderLine(COLUMNS)));
+        for await (const row of streamSignupsForCsv(prisma, batchSize)) {
+          // CsvValue-typed view of the row for the serializer.
+          controller.enqueue(
+            encoder.encode(csvRowLine(COLUMNS, row as unknown as Record<string, CsvValue>))
+          );
+        }
+        controller.close();
+      } catch (e) {
+        controller.error(e);
+      }
+    },
+  });
 
-  const csv = toCsv(COLUMNS, records);
   const filename = `waitlist-${new Date().toISOString().slice(0, 10)}.csv`;
-
-  return new NextResponse(csv, {
+  return new NextResponse(stream, {
     status: 200,
     headers: {
       "Content-Type": "text/csv; charset=utf-8",

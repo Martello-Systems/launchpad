@@ -2,7 +2,9 @@ import { describe, it, expect } from "vitest";
 import { generateReferralCode } from "../lib/referral-code";
 import { effectivePosition, normalizeEmail } from "../lib/waitlist";
 import { buildConfirmationEmail, buildMilestoneEmail } from "../lib/mailer";
-import { toCsv } from "../lib/csv";
+import { toCsv, csvHeaderLine, csvRowLine } from "../lib/csv";
+import { maskEmail } from "../lib/format";
+import { enforceMinDuration } from "../lib/timing";
 
 describe("referral codes", () => {
   it("generates codes of the requested length from the safe alphabet", () => {
@@ -90,5 +92,51 @@ describe("toCsv", () => {
     );
     expect(out).toContain("2026-01-02T03:04:05.000Z");
     expect(out.trim().endsWith(",")).toBe(true); // null -> empty trailing cell
+  });
+
+  it("streaming line helpers reproduce toCsv byte-for-byte", () => {
+    const cols = [
+      { key: "email" as const, header: "email" },
+      { key: "count" as const, header: "count" },
+    ];
+    const rows = [
+      { email: "a@b.com", count: 2 },
+      { email: "c,d@e.com", count: 5 }, // contains a comma -> must be quoted
+    ];
+    const streamed = csvHeaderLine(cols) + rows.map((r) => csvRowLine(cols, r)).join("");
+    expect(streamed).toBe(toCsv(cols, rows));
+  });
+});
+
+describe("maskEmail (shared helper)", () => {
+  it("keeps the first char and the domain, stars the rest", () => {
+    expect(maskEmail("alice@example.com")).toBe("a****@example.com");
+  });
+  it("uses at least two stars for short local parts", () => {
+    expect(maskEmail("a@b.com")).toBe("a**@b.com");
+    expect(maskEmail("ab@b.com")).toBe("a**@b.com");
+  });
+  it("degrades safely on a malformed address", () => {
+    expect(maskEmail("not-an-email")).toBe("***");
+  });
+});
+
+describe("enforceMinDuration (timing floor)", () => {
+  it("waits until the floor when work finished early", async () => {
+    const start = Date.now();
+    const slept = await enforceMinDuration(start, 60);
+    const elapsed = Date.now() - start;
+    expect(slept).toBeGreaterThan(0);
+    expect(elapsed).toBeGreaterThanOrEqual(55); // ~60ms, allow scheduler slack
+  });
+
+  it("is a no-op when the floor already elapsed", async () => {
+    const start = Date.now() - 1000; // pretend work took 1s already
+    expect(await enforceMinDuration(start, 50)).toBe(0);
+  });
+
+  it("is a no-op for a zero/negative floor", async () => {
+    expect(await enforceMinDuration(Date.now(), 0)).toBe(0);
+    expect(await enforceMinDuration(Date.now(), -5)).toBe(0);
   });
 });

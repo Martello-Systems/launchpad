@@ -57,4 +57,40 @@ describe("PrismaRateLimiter", () => {
     expect(() => new PrismaRateLimiter(prisma, { max: 0, windowMs: 1000 })).toThrow();
     expect(() => new PrismaRateLimiter(prisma, { max: 5, windowMs: 0 })).toThrow();
   });
+
+  it("pruneExpired deletes only rows whose window has elapsed", async () => {
+    const rl = new PrismaRateLimiter(prisma, { max: 5, windowMs: 60_000 });
+    // Two live keys.
+    await rl.check("live-a");
+    await rl.check("live-b");
+    // One key whose window we force into the past.
+    await rl.check("stale");
+    await prisma.$executeRawUnsafe(
+      `UPDATE "RateLimit" SET "resetAt" = now() - interval '5 seconds' WHERE "key" = 'stale'`
+    );
+
+    const before = await prisma.$queryRawUnsafe<{ count: bigint }[]>(
+      `SELECT count(*)::bigint AS count FROM "RateLimit"`
+    );
+    expect(Number(before[0].count)).toBe(3);
+
+    const deleted = await rl.pruneExpired();
+    expect(deleted).toBe(1);
+
+    const remaining = await prisma.$queryRawUnsafe<{ key: string }[]>(
+      `SELECT "key" FROM "RateLimit" ORDER BY "key"`
+    );
+    expect(remaining.map((r) => r.key)).toEqual(["live-a", "live-b"]);
+  });
+
+  it("pruneExpired respects a grace period", async () => {
+    const rl = new PrismaRateLimiter(prisma, { max: 5, windowMs: 60_000 });
+    await rl.check("recent");
+    // Expired 5s ago, but a 30s grace should spare it.
+    await prisma.$executeRawUnsafe(
+      `UPDATE "RateLimit" SET "resetAt" = now() - interval '5 seconds' WHERE "key" = 'recent'`
+    );
+    expect(await rl.pruneExpired(30_000)).toBe(0);
+    expect(await rl.pruneExpired(0)).toBe(1);
+  });
 });

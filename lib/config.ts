@@ -94,3 +94,28 @@ export function getRateLimitStore(): "memory" | "postgres" {
   const raw = (process.env.RATE_LIMIT_STORE || "").trim().toLowerCase();
   return raw === "postgres" || raw === "pg" || raw === "db" ? "postgres" : "memory";
 }
+
+/**
+ * How many rows the admin CSV export pulls per page while streaming. Bounds peak
+ * memory regardless of waitlist size. Configurable via CSV_EXPORT_BATCH_SIZE
+ * (mainly a test seam); defaults to 500, floored at 1.
+ */
+export function getCsvExportBatchSize(): number {
+  const raw = parseInt(process.env.CSV_EXPORT_BATCH_SIZE || "", 10);
+  return Number.isFinite(raw) && raw > 0 ? raw : 500;
+}
+
+/**
+ * Minimum wall-clock duration (ms) for an enumeration-relevant signup response.
+ * The endpoint pads its response up to this floor so a brand-new email and an
+ * already-registered one take the same time (closes a timing side-channel; the
+ * response body is already identical). Configurable via SIGNUP_MIN_RESPONSE_MS;
+ * defaults to 250ms. Set 0 to disable the pad.
+ */
+export function getSignupMinResponseMs(): number {
+  const raw = process.env.SIGNUP_MIN_RESPONSE_MS;
+  if (raw === undefined || raw.trim() === "") return 250;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return 250;
+  return Math.round(n);
+}

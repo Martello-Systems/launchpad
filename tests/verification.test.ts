@@ -50,7 +50,7 @@ describe("signup with verification enabled", () => {
 });
 
 describe("verifyEmail", () => {
-  it("confirms the entry, clears the token, and sends the welcome email", async () => {
+  it("confirms the entry, retains the token, clears the expiry, and sends the welcome email", async () => {
     const mailer = new MockMailer();
     await signup(prisma, { email: "v@example.com" }, { mailer, sendEmail: true });
     const token = await tokenFor("v@example.com");
@@ -62,22 +62,31 @@ describe("verifyEmail", () => {
     const row = await prisma.waitlist.findUnique({ where: { email: "v@example.com" } });
     expect(row?.verified).toBe(true);
     expect(row?.verifiedAt).toBeTruthy();
-    expect(row?.verifyToken).toBeNull();
+    // The token is retained (so a repeat confirm is idempotent), but the expiry
+    // is cleared because a confirmed entry is no longer time-limited.
+    expect(row?.verifyToken).toBe(token);
+    expect(row?.verifyTokenExpiresAt).toBeNull();
 
     // Welcome confirmation now fires.
     expect(mailer.sent).toHaveLength(1);
     expect(mailer.sent[0].subject).toMatch(/waitlist/i);
   });
 
-  it("is idempotent when the same token is re-used after verifying", async () => {
+  it("is idempotent when the same token is re-submitted after verifying", async () => {
     const mailer = new MockMailer();
     await signup(prisma, { email: "idem@example.com" }, { mailer, sendEmail: true });
     const token = await tokenFor("idem@example.com");
     await verifyEmail(prisma, token, { mailer, sendEmail: true });
-    // Token is cleared on first verify -> second call sees an invalid token.
-    await expect(verifyEmail(prisma, token, { mailer, sendEmail: true })).rejects.toMatchObject({
-      code: "INVALID_TOKEN",
-    });
+    mailer.reset();
+
+    // A second confirmation with the same token is a no-op success ("already
+    // confirmed"), NOT an INVALID_TOKEN error, and re-sends nothing.
+    const second = await verifyEmail(prisma, token, { mailer, sendEmail: true });
+    expect(second.alreadyVerified).toBe(true);
+    expect(mailer.sent).toHaveLength(0);
+
+    const row = await prisma.waitlist.findUnique({ where: { email: "idem@example.com" } });
+    expect(row?.verified).toBe(true);
   });
 
   it("rejects an unknown token", async () => {

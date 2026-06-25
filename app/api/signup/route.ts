@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resendForExistingEmail, signup, WaitlistError } from "@/lib/waitlist";
 import { getDefaultMailer } from "@/lib/mailer";
-import { isEmailVerificationEnabled, referralLink } from "@/lib/config";
+import { isEmailVerificationEnabled, referralLink, getSignupMinResponseMs } from "@/lib/config";
 import { checkSignupRateLimit, clientIpFromHeaders } from "@/lib/rate-limit";
+import { enforceMinDuration } from "@/lib/timing";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -72,6 +73,13 @@ export async function POST(req: NextRequest) {
     referredByCode = body.referredByCode;
   }
 
+  // Start the response-timing clock here, around the email-existence-dependent
+  // work (signup insert vs. duplicate resend). Every enumeration-relevant 200
+  // below is padded up to the same floor so new vs existing emails are
+  // indistinguishable by latency. See lib/timing.ts.
+  const started = Date.now();
+  const minMs = getSignupMinResponseMs();
+
   const mailer = getDefaultMailer();
   try {
     const result = await signup(
@@ -83,11 +91,13 @@ export async function POST(req: NextRequest) {
     // Double opt-in (default): respond with the generic pending body — no
     // per-account data — so it's identical to the duplicate-email case below.
     if (result.pendingVerification) {
+      await enforceMinDuration(started, minMs);
       return pendingResponse(rl);
     }
 
     // Verification disabled: signup is immediate, so it's safe (and useful) to
     // return the shareable referral details inline.
+    await enforceMinDuration(started, minMs);
     return NextResponse.json(
       {
         ok: true,
@@ -120,10 +130,12 @@ export async function POST(req: NextRequest) {
           sendEmail: true,
         });
         if (isEmailVerificationEnabled()) {
+          await enforceMinDuration(started, minMs);
           return pendingResponse(rl);
         }
         // Verification disabled and already on the list: a generic OK with no
         // per-account data (we can't echo the existing account's code/position).
+        await enforceMinDuration(started, minMs);
         return NextResponse.json(
           { ok: true, pendingVerification: false, message: "You're on the list." },
           {

@@ -36,3 +36,22 @@ export function toCsv<T extends Record<string, CsvValue>>(
   // CRLF line endings per RFC 4180; trailing newline for POSIX-friendliness.
   return [head, ...body].join("\r\n") + "\r\n";
 }
+
+// ---- Incremental (streaming) variants ----
+// Same byte output as toCsv(), but one line at a time so a large export can be
+// streamed to the client without materializing the whole table in memory.
+
+/** The CSV header line, CRLF-terminated. */
+export function csvHeaderLine<T extends Record<string, CsvValue>>(
+  columns: { key: keyof T; header: string }[]
+): string {
+  return columns.map((c) => cell(c.header)).join(",") + "\r\n";
+}
+
+/** A single CSV data line, CRLF-terminated. */
+export function csvRowLine<T extends Record<string, CsvValue>>(
+  columns: { key: keyof T; header: string }[],
+  row: T
+): string {
+  return columns.map((c) => cell(row[c.key])).join(",") + "\r\n";
+}

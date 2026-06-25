@@ -119,6 +119,7 @@ export class PrismaRateLimiter {
   // client, a tx client, or a test double), without importing @prisma/client.
   private db: {
     $queryRaw<T = unknown>(query: TemplateStringsArray, ...values: unknown[]): Promise<T>;
+    $executeRaw(query: TemplateStringsArray, ...values: unknown[]): Promise<number>;
   };
 
   constructor(
@@ -154,6 +155,20 @@ export class PrismaRateLimiter {
     const resetAt = new Date(row.resetAt).getTime();
     const now = Date.now();
     const allowed = count <= this.config.max;
+
+    // Opportunistically prune expired rows so the table can't grow unbounded
+    // under a stream of unique keys (e.g. spoofed X-Forwarded-For). Runs rarely
+    // (one write in ~PRUNE_DIVISOR) and only deletes already-expired windows, so
+    // it never affects a live counter. Best-effort: a failure here must not break
+    // the rate-limit decision.
+    if (Math.random() < 1 / PrismaRateLimiter.PRUNE_DIVISOR) {
+      try {
+        await this.pruneExpired();
+      } catch {
+        /* swallow: pruning is housekeeping, not correctness-critical */
+      }
+    }
+
     return {
       allowed,
       remaining: Math.max(0, this.config.max - count),
@@ -161,6 +176,23 @@ export class PrismaRateLimiter {
       retryAfterSeconds: Math.max(1, Math.ceil((resetAt - now) / 1000)),
       limit: this.config.max,
     };
+  }
+
+  /** Roughly one in this many checks triggers a prune sweep. */
+  private static readonly PRUNE_DIVISOR = 50;
+
+  /**
+   * Delete rate-limit rows whose window has already elapsed (plus an optional
+   * grace period so we never race a row that is rolling over right now). Returns
+   * the number of rows removed. Safe to call from a cron/cleanup path too.
+   */
+  async pruneExpired(graceMs = 0): Promise<number> {
+    const graceSec = Math.max(0, graceMs) / 1000;
+    const deleted = await this.db.$executeRaw`
+      DELETE FROM "RateLimit"
+      WHERE "resetAt" <= now() - (${graceSec} * interval '1 second')
+    `;
+    return Number(deleted);
   }
 }
 

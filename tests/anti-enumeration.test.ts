@@ -13,12 +13,14 @@ import { __resetSignupLimiterForTests } from "../lib/rate-limit";
 beforeEach(async () => {
   process.env.REQUIRE_EMAIL_VERIFICATION = "true";
   process.env.RATE_LIMIT_MAX = "1000"; // don't let the limiter interfere
+  process.env.SIGNUP_MIN_RESPONSE_MS = "0"; // these assert shape, not timing
   __resetSignupLimiterForTests();
   await resetDb();
 });
 
 afterAll(async () => {
   delete process.env.RATE_LIMIT_MAX;
+  delete process.env.SIGNUP_MIN_RESPONSE_MS;
   await prisma.$disconnect();
 });
 

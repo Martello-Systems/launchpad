@@ -4,6 +4,14 @@
   "private": true,
   "description": "Self-hosted viral waitlist in a box: signup, referrals, leaderboard, admin, embeddable widget, email automation.",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Martello-Systems/launchpad.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Martello-Systems/launchpad/issues"
+  },
+  "homepage": "https://github.com/Martello-Systems/launchpad#readme",
   "scripts": {
     "dev": "next dev",
     "build": "prisma generate && next build",

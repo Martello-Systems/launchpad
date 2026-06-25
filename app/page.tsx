@@ -1,15 +1,10 @@
 import SignupForm from "@/components/SignupForm";
 import { prisma } from "@/lib/prisma";
 import { leaderboard, totalSignups } from "@/lib/waitlist";
+import { maskEmail } from "@/lib/format";
 import { theme } from "@/theme.config";
 
 export const dynamic = "force-dynamic";
-
-function maskEmail(email: string): string {
-  const [user, domain] = email.split("@");
-  if (!domain) return "***";
-  return `${user.slice(0, 1)}${"*".repeat(Math.max(2, user.length - 1))}@${domain}`;
-}
 
 export default async function Home({
   searchParams,
