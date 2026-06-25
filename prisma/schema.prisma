@@ -18,6 +18,9 @@ model Waitlist {
   verified     Boolean   @default(false)
   // Double-opt-in: a single-use token emailed at signup; cleared on verify.
   verifyToken  String?   @unique
+  // When the verifyToken stops being valid. A click after this is rejected as
+  // expired; signing up again re-issues a fresh token. Null = no token / no TTL.
+  verifyTokenExpiresAt DateTime?
   verifiedAt   DateTime?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
@@ -29,4 +32,17 @@ model Waitlist {
 
   @@index([referredById])
   @@index([position])
+}
+
+// Shared-store fixed-window rate limiter (opt-in via RATE_LIMIT_STORE=postgres).
+// One row per limiter key (e.g. "signup:<ip>"). Unlike the default in-memory
+// limiter, this survives restarts and is shared across instances/serverless
+// lambdas, so the configured limit is enforced globally. See lib/rate-limit.ts.
+model RateLimit {
+  key       String   @id
+  count     Int      @default(0)
+  resetAt   DateTime
+  updatedAt DateTime @updatedAt
+
+  @@index([resetAt])
 }

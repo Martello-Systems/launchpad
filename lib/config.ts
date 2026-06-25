@@ -67,3 +67,30 @@ export function isEmailVerificationEnabled(): boolean {
   if (raw === "" ) return true; // safe default: verification on
   return !(raw === "false" || raw === "0" || raw === "no" || raw === "off");
 }
+
+/**
+ * How long an emailed verification token stays valid, in milliseconds. After
+ * this window a verify link is rejected as expired (the user can just sign up
+ * again to get a fresh one). Configured via VERIFY_TOKEN_TTL_HOURS; defaults to
+ * 48 hours. A value <= 0 disables expiry (tokens never time out).
+ */
+export function getVerifyTokenTtlMs(): number {
+  const raw = process.env.VERIFY_TOKEN_TTL_HOURS;
+  if (raw === undefined || raw.trim() === "") return 48 * 60 * 60 * 1000;
+  const hours = Number(raw);
+  if (!Number.isFinite(hours)) return 48 * 60 * 60 * 1000;
+  if (hours <= 0) return 0; // 0 / negative => no expiry
+  return Math.round(hours * 60 * 60 * 1000);
+}
+
+/**
+ * Which backing store the signup rate limiter uses:
+ *   - "memory" (default): in-process fixed window. Correct for a single
+ *     instance; each instance keeps its own window.
+ *   - "postgres": a shared RateLimit table so the limit is enforced globally
+ *     across instances / serverless lambdas. Set RATE_LIMIT_STORE=postgres.
+ */
+export function getRateLimitStore(): "memory" | "postgres" {
+  const raw = (process.env.RATE_LIMIT_STORE || "").trim().toLowerCase();
+  return raw === "postgres" || raw === "pg" || raw === "db" ? "postgres" : "memory";
+}

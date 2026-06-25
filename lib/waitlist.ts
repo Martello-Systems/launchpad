@@ -16,14 +16,37 @@ import { generateReferralCode } from "./referral-code";
 import {
   POSITION_BOOST_PER_REFERRAL,
   getMilestoneThreshold,
+  getVerifyTokenTtlMs,
   isEmailVerificationEnabled,
 } from "./config";
 import {
+  buildAlreadyOnListEmail,
   buildConfirmationEmail,
   buildMilestoneEmail,
   buildVerificationEmail,
   type Mailer,
 } from "./mailer";
+
+/**
+ * Mint a fresh verification token and its expiry (or null when verification is
+ * off or TTL is disabled). Centralized so signup and re-send stay consistent.
+ */
+function newVerificationToken(): { token: string; expiresAt: Date | null } {
+  const token = generateReferralCode(24);
+  const ttlMs = getVerifyTokenTtlMs();
+  const expiresAt = ttlMs > 0 ? new Date(Date.now() + ttlMs) : null;
+  return { token, expiresAt };
+}
+
+/** A pending entry's token is usable if present and not past its expiry. */
+function tokenIsLive(entry: {
+  verifyToken: string | null;
+  verifyTokenExpiresAt: Date | null;
+}): boolean {
+  if (!entry.verifyToken) return false;
+  if (!entry.verifyTokenExpiresAt) return true; // no TTL set => never expires
+  return entry.verifyTokenExpiresAt.getTime() > Date.now();
+}
 
 export class WaitlistError extends Error {
   code: "DUPLICATE_EMAIL" | "INVALID_EMAIL" | "NOT_FOUND" | "INVALID_TOKEN";
@@ -112,7 +135,9 @@ export async function signup(
   // counts AFTER verification (see referralCount / leaderboard). When disabled,
   // entries are created verified and the confirmation email fires immediately.
   const verificationEnabled = isEmailVerificationEnabled();
-  const verifyToken = verificationEnabled ? generateReferralCode(24) : null;
+  const { token: verifyToken, expiresAt: verifyTokenExpiresAt } = verificationEnabled
+    ? newVerificationToken()
+    : { token: null, expiresAt: null };
 
   let created: Waitlist;
   try {
@@ -127,6 +152,7 @@ export async function signup(
           referredById: referrer ? referrer.id : null,
           verified: !verificationEnabled,
           verifyToken,
+          verifyTokenExpiresAt,
           verifiedAt: verificationEnabled ? null : new Date(),
         },
       });
@@ -217,9 +243,20 @@ export async function verifyEmail(
     return { id: entry.id, email: entry.email, alreadyVerified: true };
   }
 
+  // Expired token: reject gracefully, exactly like an unknown token. The pending
+  // entry stays put; the user can sign up again to be issued a fresh link.
+  if (!tokenIsLive(entry)) {
+    throw new WaitlistError("INVALID_TOKEN", "This verification link is invalid or has expired.");
+  }
+
   const updated = await prisma.waitlist.update({
     where: { id: entry.id },
-    data: { verified: true, verifiedAt: new Date(), verifyToken: null },
+    data: {
+      verified: true,
+      verifiedAt: new Date(),
+      verifyToken: null,
+      verifyTokenExpiresAt: null,
+    },
   });
 
   if (opts.sendEmail && opts.mailer) {
@@ -241,6 +278,73 @@ export async function verifyEmail(
   }
 
   return { id: updated.id, email: updated.email, alreadyVerified: false };
+}
+
+/**
+ * Handle a signup attempt for an email that is ALREADY on the list, WITHOUT
+ * disclosing that it exists. This is what lets POST /api/signup return a
+ * response identical to a brand-new signup (anti-enumeration): the route calls
+ * this on a duplicate and then returns the same generic "check your inbox" body.
+ *
+ * Best-effort emails (never throws):
+ *   - entry still pending with a live token  -> resend that verification link
+ *   - entry pending but token missing/expired -> mint a fresh token, resend
+ *   - entry already verified                  -> send a benign "already on the
+ *                                                list" note (or nothing if no
+ *                                                mailer is wired)
+ *
+ * Returns whether the existing entry is pending verification so the caller can
+ * mirror the brand-new response's `pendingVerification` flag exactly.
+ */
+export async function resendForExistingEmail(
+  prisma: PrismaClient,
+  rawEmail: string,
+  opts: { mailer?: Mailer; sendEmail?: boolean } = {}
+): Promise<{ pendingVerification: boolean }> {
+  const email = normalizeEmail(rawEmail);
+  const entry = await prisma.waitlist.findUnique({ where: { email } });
+  if (!entry) {
+    // Shouldn't happen (caller only invokes this on a known duplicate), but fail
+    // safe by mirroring the configured default.
+    return { pendingVerification: isEmailVerificationEnabled() };
+  }
+
+  const pending = !entry.verified;
+
+  if (pending) {
+    // Ensure there is a live token to send; refresh it if missing/expired.
+    let token = entry.verifyToken;
+    if (!tokenIsLive(entry)) {
+      const minted = newVerificationToken();
+      token = minted.token;
+      try {
+        await prisma.waitlist.update({
+          where: { id: entry.id },
+          data: { verifyToken: minted.token, verifyTokenExpiresAt: minted.expiresAt },
+        });
+      } catch {
+        /* a concurrent verify/update can lose this race; the email below is best-effort */
+      }
+    }
+    if (opts.sendEmail && opts.mailer && token) {
+      try {
+        await opts.mailer.send(buildVerificationEmail({ email: entry.email, verifyToken: token }));
+      } catch {
+        /* swallow: email is best-effort */
+      }
+    }
+    return { pendingVerification: true };
+  }
+
+  // Already verified: send a gentle, data-free reassurance email.
+  if (opts.sendEmail && opts.mailer) {
+    try {
+      await opts.mailer.send(buildAlreadyOnListEmail({ email: entry.email }));
+    } catch {
+      /* swallow */
+    }
+  }
+  return { pendingVerification: false };
 }
 
 /**

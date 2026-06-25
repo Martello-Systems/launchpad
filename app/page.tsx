@@ -1,6 +1,7 @@
 import SignupForm from "@/components/SignupForm";
 import { prisma } from "@/lib/prisma";
 import { leaderboard, totalSignups } from "@/lib/waitlist";
+import { theme } from "@/theme.config";
 
 export const dynamic = "force-dynamic";
 
@@ -39,10 +40,8 @@ export default async function Home({
         </div>
       )}
       <header className="space-y-3 text-center">
-        <h1 className="text-4xl font-bold tracking-tight">Join the waitlist</h1>
-        <p className="text-neutral-600">
-          Sign up to get early access. Refer friends to jump the line.
-        </p>
+        <h1 className="text-4xl font-bold tracking-tight">{theme.title}</h1>
+        <p className="text-neutral-600">{theme.tagline}</p>
         {total > 0 && (
           <p className="text-sm text-neutral-500">{total} people already in line.</p>
         )}
@@ -71,11 +70,8 @@ export default async function Home({
 
       <footer className="text-center text-xs text-neutral-400">
         Powered by{" "}
-        <a
-          href="https://github.com/martello-systems/launchpad"
-          className="underline hover:text-neutral-600"
-        >
-          Launchpad
+        <a href={theme.footer.href} className="underline hover:text-neutral-600">
+          {theme.footer.label}
         </a>
       </footer>
     </main>

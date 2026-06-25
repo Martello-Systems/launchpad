@@ -90,6 +90,47 @@ describe("verifyEmail", () => {
   });
 });
 
+describe("verification token TTL", () => {
+  it("stamps a future expiry on the token at signup", async () => {
+    const mailer = new MockMailer();
+    await signup(prisma, { email: "ttl@example.com" }, { mailer, sendEmail: true });
+    const row = await prisma.waitlist.findUnique({ where: { email: "ttl@example.com" } });
+    expect(row?.verifyTokenExpiresAt).toBeTruthy();
+    expect(row!.verifyTokenExpiresAt!.getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it("rejects an expired token gracefully (INVALID_TOKEN), leaving the entry pending", async () => {
+    const mailer = new MockMailer();
+    await signup(prisma, { email: "exp@example.com" }, { mailer, sendEmail: true });
+    const token = await tokenFor("exp@example.com");
+    // Move the expiry into the past.
+    await prisma.waitlist.update({
+      where: { email: "exp@example.com" },
+      data: { verifyTokenExpiresAt: new Date(Date.now() - 60_000) },
+    });
+
+    await expect(verifyEmail(prisma, token, { mailer, sendEmail: true })).rejects.toMatchObject({
+      code: "INVALID_TOKEN",
+    });
+
+    // Still pending, token not consumed.
+    const row = await prisma.waitlist.findUnique({ where: { email: "exp@example.com" } });
+    expect(row?.verified).toBe(false);
+    expect(row?.verifyToken).toBe(token);
+  });
+
+  it("still accepts a token before its expiry", async () => {
+    const mailer = new MockMailer();
+    await signup(prisma, { email: "live@example.com" }, { mailer, sendEmail: true });
+    const token = await tokenFor("live@example.com");
+    const res = await verifyEmail(prisma, token, { mailer, sendEmail: true });
+    expect(res.alreadyVerified).toBe(false);
+    const row = await prisma.waitlist.findUnique({ where: { email: "live@example.com" } });
+    expect(row?.verified).toBe(true);
+    expect(row?.verifyTokenExpiresAt).toBeNull();
+  });
+});
+
 describe("referral credit only counts VERIFIED signups", () => {
   it("does not credit the referrer until the referred signup is verified", async () => {
     const mailer = new MockMailer();

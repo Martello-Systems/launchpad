@@ -4,6 +4,15 @@
 
 :root {
   color-scheme: light dark;
+
+  /* ---- Brand palette (rebrand here) ----------------------------------- */
+  /* These drive the Tailwind `brand` color tokens (see tailwind.config.ts):
+     bg-brand / hover:bg-brand-hover / text-brand-fg. Change these three to
+     recolor every call-to-action without touching component markup. Keep
+     --brand in sync with theme.config.ts `email.accent` for matching emails. */
+  --brand: #111111; /* primary action / accent */
+  --brand-hover: #404040; /* CTA hover */
+  --brand-fg: #ffffff; /* text/icon on a brand surface */
 }
 
 body {

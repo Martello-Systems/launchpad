@@ -19,6 +19,36 @@ export default function AdminPage() {
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<{ total: number; signups: Signup[] } | null>(null);
 
+  async function downloadCsv() {
+    // The export route is bearer-guarded, so a plain link won't carry the token.
+    // Fetch with the header, then save the response as a file via a blob URL.
+    setError(null);
+    try {
+      const res = await fetch("/api/admin/export", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.status === 401) {
+        setError("Invalid admin token.");
+        return;
+      }
+      if (!res.ok) {
+        setError("Export failed.");
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `waitlist-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      setError("Network error.");
+    }
+  }
+
   async function load(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
@@ -57,7 +87,7 @@ export default function AdminPage() {
         <button
           type="submit"
           disabled={loading}
-          className="rounded-md bg-neutral-900 px-5 py-2 text-sm font-medium text-white hover:bg-neutral-700 disabled:opacity-50"
+          className="rounded-md bg-brand px-5 py-2 text-sm font-medium text-brand-fg hover:bg-brand-hover disabled:opacity-50"
         >
           {loading ? "Loading…" : "Load"}
         </button>
@@ -67,7 +97,15 @@ export default function AdminPage() {
 
       {data && (
         <div className="space-y-4">
-          <p className="text-sm text-neutral-600">{data.total} total signups</p>
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-neutral-600">{data.total} total signups</p>
+            <button
+              onClick={downloadCsv}
+              className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-100"
+            >
+              Export CSV
+            </button>
+          </div>
           <div className="overflow-x-auto rounded-lg border border-neutral-200">
             <table className="w-full text-left text-sm">
               <thead className="bg-neutral-100 text-neutral-600">

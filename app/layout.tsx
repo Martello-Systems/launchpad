@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { theme } from "@/theme.config";
 
 export const metadata: Metadata = {
-  title: "Launchpad: Join the Waitlist",
-  description: "A self-hosted viral waitlist. Sign up and refer friends to move up.",
+  title: `${theme.appName}: ${theme.title}`,
+  description: theme.tagline,
 };
 
 export default function RootLayout({

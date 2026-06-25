@@ -2,6 +2,7 @@
 // Tests inject a mock; production uses the Resend-backed implementation.
 
 import { getAppUrl, getEmailFrom, referralLink } from "./config";
+import { theme } from "../theme.config";
 
 export interface MailMessage {
   to: string;
@@ -113,9 +114,29 @@ If you didn't request this, you can ignore this email.`;
   const html = `<div style="font-family:sans-serif;max-width:480px">
   <h2>Confirm your email</h2>
   <p>Almost there! Click below to lock in your spot on the waitlist.</p>
-  <p><a href="${link}" style="display:inline-block;background:#111;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none">Confirm my spot</a></p>
+  <p><a href="${link}" style="display:inline-block;background:${theme.email.accent};color:${theme.email.accentFg};padding:10px 18px;border-radius:6px;text-decoration:none">Confirm my spot</a></p>
   <p style="color:#666;font-size:13px">Or paste this link: <br><a href="${link}">${link}</a></p>
   <p style="color:#999;font-size:12px">If you didn't request this, you can ignore this email.</p>
+</div>`;
+  return { to: params.email, subject, html, text };
+}
+
+/**
+ * Sent when someone tries to sign up with an email that is ALREADY verified and
+ * on the list. It carries no position or new code (nothing to leak); it just
+ * reassures the recipient. This is what lets the signup endpoint return an
+ * identical response whether or not the email already existed (anti-enumeration)
+ * without going silent on a legitimate "did my signup work?" retry.
+ */
+export function buildAlreadyOnListEmail(params: { email: string }): MailMessage {
+  const subject = "You're already on the waitlist";
+  const text = `Good news: this email is already on the waitlist, so there's nothing more to do.
+
+If you didn't just try to sign up again, you can safely ignore this email.`;
+  const html = `<div style="font-family:sans-serif;max-width:480px">
+  <h2>You're already on the waitlist</h2>
+  <p>This email is already confirmed and on the list, so there's nothing more to do.</p>
+  <p style="color:#999;font-size:12px">If you didn't just try to sign up again, you can ignore this email.</p>
 </div>`;
   return { to: params.email, subject, html, text };
 }

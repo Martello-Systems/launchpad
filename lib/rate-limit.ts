@@ -14,6 +14,8 @@
 // and cheaper than a sliding window and is the right trade-off for abuse/spam
 // prevention on a public signup endpoint.
 
+import { getRateLimitStore } from "./config";
+
 export interface RateLimitConfig {
   /** Max allowed requests per key within the window. */
   max: number;
@@ -101,6 +103,67 @@ export class RateLimiter {
   }
 }
 
+/**
+ * Shared-store fixed-window limiter backed by Postgres (the `RateLimit` table)
+ * via Prisma. Unlike RateLimiter, this is correct across multiple instances /
+ * serverless lambdas because the counter lives in the database, not process
+ * memory. Opt in with RATE_LIMIT_STORE=postgres.
+ *
+ * The window is advanced atomically in a single INSERT ... ON CONFLICT so two
+ * concurrent requests can't both reset or double-count the window. Clock math
+ * uses the database's now() for consistency across instances.
+ */
+export class PrismaRateLimiter {
+  private config: RateLimitConfig;
+  // Structural type: anything exposing Prisma's $queryRaw tag works (the real
+  // client, a tx client, or a test double), without importing @prisma/client.
+  private db: {
+    $queryRaw<T = unknown>(query: TemplateStringsArray, ...values: unknown[]): Promise<T>;
+  };
+
+  constructor(
+    db: PrismaRateLimiter["db"],
+    config: RateLimitConfig
+  ) {
+    if (!Number.isFinite(config.max) || config.max <= 0) {
+      throw new Error("PrismaRateLimiter: max must be a positive number");
+    }
+    if (!Number.isFinite(config.windowMs) || config.windowMs <= 0) {
+      throw new Error("PrismaRateLimiter: windowMs must be a positive number");
+    }
+    this.config = config;
+    this.db = db;
+  }
+
+  async check(key: string): Promise<RateLimitResult> {
+    const windowSec = this.config.windowMs / 1000;
+    // Bump the counter, rolling the window over when the stored one has expired.
+    const rows = await this.db.$queryRaw<{ count: number | bigint; resetAt: Date }[]>`
+      INSERT INTO "RateLimit" ("key", "count", "resetAt", "updatedAt")
+      VALUES (${key}, 1, now() + (${windowSec} * interval '1 second'), now())
+      ON CONFLICT ("key") DO UPDATE SET
+        "count" = CASE WHEN "RateLimit"."resetAt" <= now() THEN 1 ELSE "RateLimit"."count" + 1 END,
+        "resetAt" = CASE WHEN "RateLimit"."resetAt" <= now()
+                         THEN now() + (${windowSec} * interval '1 second')
+                         ELSE "RateLimit"."resetAt" END,
+        "updatedAt" = now()
+      RETURNING "count", "resetAt";
+    `;
+    const row = rows[0];
+    const count = Number(row.count);
+    const resetAt = new Date(row.resetAt).getTime();
+    const now = Date.now();
+    const allowed = count <= this.config.max;
+    return {
+      allowed,
+      remaining: Math.max(0, this.config.max - count),
+      resetAt,
+      retryAfterSeconds: Math.max(1, Math.ceil((resetAt - now) / 1000)),
+      limit: this.config.max,
+    };
+  }
+}
+
 /** Read limiter config from env with safe defaults. */
 export function getSignupRateLimitConfig(): RateLimitConfig {
   const max = parseInt(process.env.RATE_LIMIT_MAX || "", 10);
@@ -141,4 +204,19 @@ export function getSignupLimiter(): RateLimiter {
 // Test seam: reset the singleton so a test can pick up fresh env config.
 export function __resetSignupLimiterForTests(): void {
   signupLimiter = null;
+}
+
+/**
+ * Check the signup rate limit using whichever store is configured
+ * (RATE_LIMIT_STORE): the shared Postgres limiter when "postgres", otherwise the
+ * in-memory singleton. Always returns a Promise so callers don't care which.
+ */
+export async function checkSignupRateLimit(
+  db: PrismaRateLimiter["db"] | null,
+  key: string
+): Promise<RateLimitResult> {
+  if (getRateLimitStore() === "postgres" && db) {
+    return new PrismaRateLimiter(db, getSignupRateLimitConfig()).check(key);
+  }
+  return getSignupLimiter().check(key);
 }

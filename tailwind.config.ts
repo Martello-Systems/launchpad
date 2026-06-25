@@ -6,7 +6,18 @@ const config: Config = {
     "./components/**/*.{js,ts,jsx,tsx,mdx}",
   ],
   theme: {
-    extend: {},
+    extend: {
+      // Brand tokens backed by CSS variables defined in app/globals.css.
+      // Rebrand by editing those variables (and theme.config.ts for text/email
+      // accent); components reference `brand` / `brand-hover` / `brand-fg`.
+      colors: {
+        brand: {
+          DEFAULT: "var(--brand)",
+          hover: "var(--brand-hover)",
+          fg: "var(--brand-fg)",
+        },
+      },
+    },
   },
   plugins: [],
 };

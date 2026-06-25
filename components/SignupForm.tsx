@@ -3,11 +3,11 @@
 import { useState, useEffect } from "react";
 
 interface SignupSuccess {
-  email: string;
-  referralCode: string;
-  position: number;
-  referralLink: string;
   pendingVerification?: boolean;
+  // Present only when verification is disabled (instant signup); omitted while a
+  // signup is pending verification so the response never leaks per-account data.
+  position?: number;
+  referralLink?: string;
 }
 
 export default function SignupForm({ compact = false }: { compact?: boolean }) {
@@ -50,7 +50,7 @@ export default function SignupForm({ compact = false }: { compact?: boolean }) {
   }
 
   async function copyLink() {
-    if (!result) return;
+    if (!result?.referralLink) return;
     try {
       await navigator.clipboard.writeText(result.referralLink);
       setCopied(true);
@@ -61,39 +61,56 @@ export default function SignupForm({ compact = false }: { compact?: boolean }) {
   }
 
   if (result) {
+    // Pending verification: a deliberately generic "check your inbox" state.
+    // We show no position or referral link here because the signup response is
+    // intentionally identical whether or not the email was already on the list
+    // (anti-enumeration). The referral link arrives in the confirmation email
+    // once the address is verified.
+    if (result.pendingVerification) {
+      return (
+        <div className="rounded-lg bg-green-50 p-4 text-green-800">
+          <p className="font-semibold">Almost there! 📬</p>
+          <p className="mt-1 text-sm">
+            Check your inbox and click the link to confirm your email. Once
+            you&apos;re confirmed you&apos;ll get your referral link and start
+            climbing the list.
+          </p>
+        </div>
+      );
+    }
+
+    // Verification disabled: instant signup, show the shareable link inline.
     return (
       <div className="space-y-4">
         <div className="rounded-lg bg-green-50 p-4 text-green-800">
           <p className="font-semibold">You&apos;re in! 🎉</p>
-          <p className="text-sm">
-            Your position: <strong>#{result.position}</strong>
-          </p>
-          {result.pendingVerification && (
-            <p className="mt-2 text-sm">
-              Check your inbox and click the link to confirm your email. Your
-              referrals only count once you&apos;re confirmed.
+          {typeof result.position === "number" && (
+            <p className="text-sm">
+              Your position: <strong>#{result.position}</strong>
             </p>
           )}
         </div>
-        <div className="space-y-2">
-          <p className="text-sm text-neutral-600">
-            Share your link: every signup moves you up the list:
-          </p>
-          <div className="flex gap-2">
-            <input
-              readOnly
-              value={result.referralLink}
-              className="flex-1 rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm"
-              onFocus={(e) => e.currentTarget.select()}
-            />
-            <button
-              onClick={copyLink}
-              className="rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-700"
-            >
-              {copied ? "Copied" : "Copy"}
-            </button>
+        {result.referralLink && (
+          <div className="space-y-2">
+            <p className="text-sm text-neutral-600">
+              Share your link: every signup moves you up the list:
+            </p>
+            <div className="flex gap-2">
+              <input
+                readOnly
+                value={result.referralLink}
+                className="flex-1 rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm"
+                onFocus={(e) => e.currentTarget.select()}
+              />
+              <button
+                onClick={copyLink}
+                className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-brand-fg hover:bg-brand-hover"
+              >
+                {copied ? "Copied" : "Copy"}
+              </button>
+            </div>
           </div>
-        </div>
+        )}
       </div>
     );
   }
@@ -112,7 +129,7 @@ export default function SignupForm({ compact = false }: { compact?: boolean }) {
         <button
           type="submit"
           disabled={loading}
-          className="rounded-md bg-neutral-900 px-5 py-2 text-sm font-medium text-white hover:bg-neutral-700 disabled:opacity-50"
+          className="rounded-md bg-brand px-5 py-2 text-sm font-medium text-brand-fg hover:bg-brand-hover disabled:opacity-50"
         >
           {loading ? "Joining…" : "Join waitlist"}
         </button>

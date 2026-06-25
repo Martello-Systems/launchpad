@@ -11,7 +11,7 @@
 - **Embeddable.** One `<script>` tag drops the signup form onto any site, with a configurable `frame-ancestors` allowlist.
 - **Rate-limited signup.** Per-IP limiter on the public endpoint to blunt spam/abuse, configurable via env.
 - **Email automation.** Verification + confirmation + referral-milestone emails via [Resend](https://resend.com) (mockable; console-only in dev).
-- **Tested.** 54 tests against a real Postgres DB: signup, attribution, leaderboard, position rule, verification flow, rate limiter, and embed CSP. CI runs them on every push.
+- **Tested.** 71 tests against a real Postgres DB: signup, attribution, leaderboard, position rule, verification flow + token expiry, anti-enumeration, in-memory + Postgres rate limiters, CSV export, and embed CSP. CI runs them on every push.
 
 Stack: **Next.js 15 (App Router) · Prisma · PostgreSQL · Resend · Tailwind · TypeScript**
 
@@ -41,8 +41,10 @@ npm run dev                 # http://localhost:3000
 | `NEXT_PUBLIC_APP_URL` | yes | Public base URL, used to build referral + verification links. |
 | `REFERRAL_MILESTONE` | no | Referrals per milestone email (default `3`). |
 | `REQUIRE_EMAIL_VERIFICATION` | no | Double opt-in on/off (default `true`). When `false`, every signup counts immediately. |
+| `VERIFY_TOKEN_TTL_HOURS` | no | How long a verification link stays valid (default `48`). `0` disables expiry. |
 | `RATE_LIMIT_MAX` | no | Max signup attempts per IP per window (default `5`). |
 | `RATE_LIMIT_WINDOW_MS` | no | Rate-limit window in ms (default `60000`). |
+| `RATE_LIMIT_STORE` | no | Rate-limit backing store: `memory` (default) or `postgres` (shared across instances). |
 | `EMBED_ALLOWED_ORIGINS` | no | Origins allowed to iframe the widget (default `'self'`). See [Embed](#embed-on-any-site). |
 
 Secrets live only in `.env` (gitignored). Only `.env.example` (placeholders) is committed.
@@ -77,11 +79,24 @@ With `REQUIRE_EMAIL_VERIFICATION=true` (the default):
 
 Set `REQUIRE_EMAIL_VERIFICATION=false` to skip this: signups are created verified, the welcome email fires immediately, and every referral counts at once.
 
+**Verification links expire.** A verification token is single-use (cleared on confirm) **and** time-limited: it stops working after `VERIFY_TOKEN_TTL_HOURS` (default 48h). An expired link is rejected exactly like an invalid one; signing up again simply issues a fresh link.
+
+### No email enumeration
+`POST /api/signup` is designed so its response can't be used to discover which addresses are on the list. With double opt-in on (the default), it returns the **same** generic `200 { ok, pendingVerification: true }` body whether the email is brand-new, already pending, or already verified, and never echoes per-account data (no code, position, or link). Behind the scenes it still does the right thing: a new email gets a verification link, a pending one gets its link re-sent (refreshed if expired), and an already-verified one gets a benign "you're already on the list" note. (With verification **off**, a genuinely new signup returns its referral details inline for instant sharing, so that legacy mode is less opaque by design.)
+
 ### Email plumbing
 All sends go through the `Mailer` interface (`lib/mailer.ts`). Production uses `ResendMailer` (reads `RESEND_API_KEY`); dev/tests with no key fall back to `ConsoleMailer`; tests inject a capturing mock. A milestone email fires when a referrer reaches each multiple of `REFERRAL_MILESTONE` **verified** referrals.
 
 ### Rate limiting
-The public `POST /api/signup` endpoint is rate-limited per client IP using an in-memory fixed-window limiter (`lib/rate-limit.ts`), configured by `RATE_LIMIT_MAX` and `RATE_LIMIT_WINDOW_MS`. Over-limit requests get `429` with `Retry-After`. See [Limitations](#limitations) for the multi-instance caveat.
+The public `POST /api/signup` endpoint is rate-limited per client IP using a fixed-window limiter (`lib/rate-limit.ts`), configured by `RATE_LIMIT_MAX` and `RATE_LIMIT_WINDOW_MS`. Over-limit requests get `429` with `Retry-After`. The default store is in-memory (per-instance); set `RATE_LIMIT_STORE=postgres` to use a shared `RateLimit` table so the limit is enforced globally across instances / serverless lambdas (the window is advanced atomically in a single `INSERT … ON CONFLICT`).
+
+### Theming
+Rebranding lives in two small places, no component edits required:
+
+- **`theme.config.ts`** (repo root) — the product name, page title, tagline, footer link, and the accent color used in emails.
+- **`app/globals.css`** `:root` — three CSS variables (`--brand`, `--brand-hover`, `--brand-fg`) that drive the Tailwind `brand` / `brand-hover` / `brand-fg` color tokens every call-to-action uses.
+
+Change those and the public page, admin, embed widget, `<title>`/metadata, and transactional emails all follow.
 
 ---
 
@@ -89,10 +104,11 @@ The public `POST /api/signup` endpoint is rate-limited per client IP using an in
 
 | Method | Route | Auth | Description |
 |---|---|---|---|
-| `POST` | `/api/signup` | rate-limited | Body `{ email, referredByCode? }` → `{ referralCode, position, referralLink, pendingVerification }`. `409` on duplicate email, `429` over the rate limit. |
-| `GET`/`POST` | `/api/verify?token=…` | none | Confirms a signup. Redirects to `/?verified=1` (or `?verified=error`); returns JSON when `Accept: application/json`. |
+| `POST` | `/api/signup` | rate-limited | Body `{ email, referredByCode? }`. With double opt-in on (default), always returns the **same** `200 { ok, pendingVerification: true }` whether or not the email already exists (anti-enumeration, see below). With verification off, a fresh signup returns `{ ok, referralCode, position, referralLink }`. `429` over the rate limit. |
+| `GET`/`POST` | `/api/verify?token=…` | none | Confirms a signup. Redirects to `/?verified=1` (or `?verified=error`); returns JSON when `Accept: application/json`. Expired tokens are rejected like invalid ones. |
 | `GET` | `/api/leaderboard?limit=10` | none | Top referrers by **verified** referrals (emails masked). |
 | `GET` | `/api/admin/signups?take=&skip=` | Bearer `ADMIN_TOKEN` | Full signup list with referral counts + verified status. |
+| `GET` | `/api/admin/export` | Bearer `ADMIN_TOKEN` | Full waitlist as a downloadable **CSV** (`text/csv` attachment). The admin page has an "Export CSV" button. |
 
 Example:
 
@@ -152,7 +168,7 @@ The core library is tested against a **real Postgres test DB** (it migrates/rese
 TEST_DATABASE_URL="postgresql://user:pass@localhost:5432/launchpad_test" npm test
 ```
 
-Coverage (54 tests) includes: signup + sequential positions, email normalization, duplicate/invalid-email handling, referral-code uniqueness, referral attribution + counts, the position-boost rule, leaderboard ordering + tie-breaks + limit, milestone-email firing, the admin listing, the **rate limiter** (under/over limit, window reset, key isolation), the **embed CSP** header (default/allowlist/wildcard + middleware), and the full **double-opt-in verification flow** (pending state, verify token, idempotency, and verified-only referral credit).
+Coverage (71 tests) includes: signup + sequential positions, email normalization, duplicate/invalid-email handling, referral-code uniqueness, referral attribution + counts, the position-boost rule, leaderboard ordering + tie-breaks + limit, milestone-email firing, the admin listing, the **rate limiter** (in-memory and the Postgres shared store: under/over limit, window reset, key isolation), the **embed CSP** header (default/allowlist/wildcard + middleware), the full **double-opt-in verification flow** (pending state, verify token, idempotency, verified-only referral credit), **token TTL** (expired links rejected), **anti-enumeration** (identical signup responses for new vs existing emails), and **CSV** serialization (quoting, formula-injection defense).
 
 ### Continuous integration
 `.github/workflows/ci.yml` spins up a Postgres 16 service, installs deps, runs `prisma generate` + `migrate deploy`, then lint, typecheck, the test suite, and `npm run build` on every push/PR.
@@ -161,10 +177,10 @@ Coverage (54 tests) includes: signup + sequential positions, email normalization
 
 ## Limitations
 
-- **Rate limiting is in-memory and per-instance.** It's correct for a single self-hosted instance (the common case). Behind a load balancer / on serverless, each instance keeps its own window, so the effective global limit is roughly `limit × instances`. For multi-instance setups, back the same `RateLimiter` interface with a shared store (Redis/Upstash). v1 deliberately avoids that infra.
-- **Verification tokens don't expire.** A token is single-use (cleared on verify) but has no TTL in v1. Add an expiry check if you need one.
+- **Rate limiting defaults to in-memory (per-instance).** Correct for a single self-hosted instance (the common case); each instance keeps its own window. For multi-instance / serverless deployments set `RATE_LIMIT_STORE=postgres` to enforce the limit globally via the shared `RateLimit` table.
 - **Email masking on the public leaderboard** is best-effort obfuscation, not anonymization.
-- **Single-table model:** no multi-project/multi-tenant support (roadmap).
+- **Anti-enumeration applies to the double-opt-in (default) mode.** With `REQUIRE_EMAIL_VERIFICATION=false`, a brand-new signup returns its referral details inline while a duplicate returns a generic OK, so that legacy mode reveals a little more. Keep verification on (the default) for the strongest posture.
+- **Single-table waitlist model:** no multi-project/multi-tenant support (roadmap, and the biggest future lever).
 
 ---
 

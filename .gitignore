@@ -16,3 +16,6 @@
 .vercel
 *.tsbuildinfo
 next-env.d.ts
+
+# local tooling / agent scratch (never part of the product)
+/agents
