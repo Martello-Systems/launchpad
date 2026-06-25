@@ -1,4 +1,4 @@
-// Launchpad — Prisma schema
+// Launchpad: Prisma schema
 // A single Waitlist table with self-referential referral attribution.
 
 generator client {

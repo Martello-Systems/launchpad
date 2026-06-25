@@ -77,7 +77,7 @@ export default function SignupForm({ compact = false }: { compact?: boolean }) {
         </div>
         <div className="space-y-2">
           <p className="text-sm text-neutral-600">
-            Share your link — every signup moves you up the list:
+            Share your link: every signup moves you up the list:
           </p>
           <div className="flex gap-2">
             <input

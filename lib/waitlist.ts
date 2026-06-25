@@ -95,7 +95,7 @@ export async function signup(
       where: { referralCode: input.referredByCode.trim() },
     });
     // A bad/unknown code is silently ignored (no attribution) rather than
-    // failing the signup — the person still wants to join.
+    // failing the signup: the person still wants to join.
   }
 
   // Pre-existing email check for a clean error (the unique constraint is the
@@ -170,7 +170,7 @@ export async function signup(
         }
       }
     } catch {
-      /* swallow — email is not critical to the signup transaction */
+      /* swallow: email is not critical to the signup transaction */
     }
   }
 
@@ -190,7 +190,7 @@ export async function signup(
 /**
  * Confirm a signup via its verification token. Marks the entry verified,
  * clears the single-use token, then (best-effort) sends the welcome
- * confirmation email and credits the referrer's milestone — because referral
+ * confirmation email and credits the referrer's milestone, because referral
  * credit only counts verified signups.
  *
  * Throws WaitlistError("INVALID_TOKEN") for an unknown/used token. Verifying an
@@ -213,7 +213,7 @@ export async function verifyEmail(
   }
 
   if (entry.verified) {
-    // Token still present but already verified — treat as idempotent success.
+    // Token still present but already verified: treat as idempotent success.
     return { id: entry.id, email: entry.email, alreadyVerified: true };
   }
 
@@ -236,7 +236,7 @@ export async function verifyEmail(
         await maybeSendMilestone(prisma, updated.referredById, opts.mailer);
       }
     } catch {
-      /* swallow — email is not critical to verification */
+      /* swallow: email is not critical to verification */
     }
   }
 
@@ -342,8 +342,8 @@ export async function leaderboard(
 
 /**
  * Send the milestone email if the referrer's referral count is exactly at a
- * multiple of the configured threshold (so it fires at 3, 6, 9, ... by default
- * — not on every referral after the first milestone).
+ * multiple of the configured threshold (so it fires at 3, 6, 9, ... by default,
+ * not on every referral after the first milestone).
  */
 async function maybeSendMilestone(
   prisma: PrismaClient,

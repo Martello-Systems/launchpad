@@ -23,14 +23,14 @@ export default async function Home({
   try {
     [total, board] = await Promise.all([totalSignups(prisma), leaderboard(prisma, 5)]);
   } catch {
-    /* DB not configured yet — page still renders the signup form */
+    /* DB not configured yet: page still renders the signup form */
   }
 
   return (
     <main className="mx-auto flex min-h-screen max-w-xl flex-col justify-center gap-10 px-6 py-16">
       {verified === "1" && (
         <div className="rounded-lg bg-green-50 p-4 text-center text-sm text-green-800">
-          Email confirmed — you&apos;re officially on the waitlist. 🎉
+          Email confirmed. You&apos;re officially on the waitlist. 🎉
         </div>
       )}
       {verified === "error" && (

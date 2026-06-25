@@ -2,7 +2,7 @@
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE) [![Built by Martello Systems](https://img.shields.io/badge/built%20by-Martello%20Systems-0b0b14)](https://martellosystems.com)
 
-**A self-hosted viral waitlist in a box.** Signup, referral codes with attribution, position tracking + leaderboard, an admin dashboard, an embeddable widget, and email automation — all in one deployable Next.js app. This is the thing you deploy, not a template you assemble.
+**A self-hosted viral waitlist in a box.** Signup, referral codes with attribution, position tracking + leaderboard, an admin dashboard, an embeddable widget, and email automation, all in one deployable Next.js app. This is the thing you deploy, not a template you assemble.
 
 - **Referral loops built in.** Every signup gets a unique referral link. Each successful (verified) referral moves them up the line.
 - **Double opt-in.** Signups confirm their email via a verification link; only verified referrals count (anti-gaming). Toggle off if you don't want it.
@@ -90,8 +90,8 @@ The public `POST /api/signup` endpoint is rate-limited per client IP using an in
 | Method | Route | Auth | Description |
 |---|---|---|---|
 | `POST` | `/api/signup` | rate-limited | Body `{ email, referredByCode? }` → `{ referralCode, position, referralLink, pendingVerification }`. `409` on duplicate email, `429` over the rate limit. |
-| `GET`/`POST` | `/api/verify?token=…` | — | Confirms a signup. Redirects to `/?verified=1` (or `?verified=error`); returns JSON when `Accept: application/json`. |
-| `GET` | `/api/leaderboard?limit=10` | — | Top referrers by **verified** referrals (emails masked). |
+| `GET`/`POST` | `/api/verify?token=…` | none | Confirms a signup. Redirects to `/?verified=1` (or `?verified=error`); returns JSON when `Accept: application/json`. |
+| `GET` | `/api/leaderboard?limit=10` | none | Top referrers by **verified** referrals (emails masked). |
 | `GET` | `/api/admin/signups?take=&skip=` | Bearer `ADMIN_TOKEN` | Full signup list with referral counts + verified status. |
 
 Example:
@@ -109,15 +109,15 @@ curl localhost:3000/api/admin/signups \
 
 ## Pages
 
-- `/` — public waitlist page: signup form (auto-captures `?ref=CODE`), shows your position + referral link, and a top-referrers list.
-- `/admin` — token-prompted admin dashboard listing every signup.
-- `/embed` — chrome-free signup form for iframe embedding.
+- `/`: public waitlist page: signup form (auto-captures `?ref=CODE`), shows your position + referral link, and a top-referrers list.
+- `/admin`: token-prompted admin dashboard listing every signup.
+- `/embed`: chrome-free signup form for iframe embedding.
 
 ---
 
 ## Embed on any site
 
-**Option A — script tag (recommended).** Drop this anywhere; it injects a responsive iframe:
+**Option A: script tag (recommended).** Drop this anywhere; it injects a responsive iframe:
 
 ```html
 <script src="https://your-launchpad.example.com/embed.js"
@@ -125,7 +125,7 @@ curl localhost:3000/api/admin/signups \
         data-height="120"></script>
 ```
 
-**Option B — raw iframe.**
+**Option B: raw iframe.**
 
 ```html
 <iframe src="https://your-launchpad.example.com/embed"
@@ -137,7 +137,7 @@ curl localhost:3000/api/admin/signups \
 
 - **unset / empty** → `frame-ancestors 'self'` (safe default: only your own deployment may iframe it).
 - **`EMBED_ALLOWED_ORIGINS="https://acme.com https://www.acme.com"`** → `frame-ancestors 'self' https://acme.com https://www.acme.com`.
-- **`EMBED_ALLOWED_ORIGINS="*"`** → `frame-ancestors *` (any site — opt-in only).
+- **`EMBED_ALLOWED_ORIGINS="*"`** → `frame-ancestors *` (any site, opt-in only).
 
 Because it's read at request time, you can change the allowlist without rebuilding.
 
@@ -164,7 +164,7 @@ Coverage (54 tests) includes: signup + sequential positions, email normalization
 - **Rate limiting is in-memory and per-instance.** It's correct for a single self-hosted instance (the common case). Behind a load balancer / on serverless, each instance keeps its own window, so the effective global limit is roughly `limit × instances`. For multi-instance setups, back the same `RateLimiter` interface with a shared store (Redis/Upstash). v1 deliberately avoids that infra.
 - **Verification tokens don't expire.** A token is single-use (cleared on verify) but has no TTL in v1. Add an expiry check if you need one.
 - **Email masking on the public leaderboard** is best-effort obfuscation, not anonymization.
-- **Single-table model** — no multi-project/multi-tenant support (roadmap).
+- **Single-table model:** no multi-project/multi-tenant support (roadmap).
 
 ---
 
@@ -185,13 +185,13 @@ MIT © 2026 Martello Systems. See [LICENSE](./LICENSE).
 
 ---
 
-<sub>Built by **Martello Systems** — we design and ship AI-driven software.
+<sub>Built by **Martello Systems**. We design and ship AI-driven software.
 Part of the Martello open-source dev-tools family.</sub>
 
 ---
 
 ## Built by Martello Systems
 
-`launchpad` is part of the open-source toolkit from **[Martello Systems](https://martellosystems.com)** — we ship AI-built software, spec to delivery in days. If this saved you time, come [see what we do](https://martellosystems.com).
+`launchpad` is part of the open-source toolkit from **[Martello Systems](https://martellosystems.com)**. We ship AI-built software, spec to delivery in days. If this saved you time, come [see what we do](https://martellosystems.com).
 
 Licensed under the [Apache License 2.0](LICENSE).

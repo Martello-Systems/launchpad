@@ -12,7 +12,7 @@ process.env.DATABASE_URL = testUrl;
 
 beforeAll(() => {
   // Apply the committed migrations to the test DB once per run. `migrate deploy`
-  // is idempotent and non-interactive — safe for CI.
+  // is idempotent and non-interactive, safe for CI.
   execSync("npx prisma migrate deploy", {
     stdio: "inherit",
     env: { ...process.env, DATABASE_URL: testUrl },

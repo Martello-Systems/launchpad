@@ -7,7 +7,7 @@
 //   balancer, each instance keeps its own window, so the effective global limit
 //   is roughly (limit × instanceCount). For multi-instance setups, put a shared
 //   store (Redis/Upstash) behind this same interface. We deliberately avoid
-//   adding that infra to v1 — see README "Limitations".
+//   adding that infra to v1, see README "Limitations".
 //
 // Algorithm: fixed window per key. Each key tracks a count and the window's
 // reset timestamp. When the window elapses, the count resets. This is simpler

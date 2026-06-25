@@ -15,7 +15,7 @@ export interface Mailer {
 }
 
 /**
- * Console mailer — used when no RESEND_API_KEY is present (local dev/test).
+ * Console mailer, used when no RESEND_API_KEY is present (local dev/test).
  * Logs the message instead of sending. Never throws.
  */
 export class ConsoleMailer implements Mailer {
@@ -126,7 +126,7 @@ export function buildMilestoneEmail(params: {
   position: number;
 }): MailMessage {
   const subject = `You've referred ${params.referralCount} people!`;
-  const text = `Nice work — ${params.referralCount} referrals so far. You're now #${params.position} on the waitlist. Keep sharing!`;
+  const text = `Nice work. ${params.referralCount} referrals so far. You're now #${params.position} on the waitlist. Keep sharing!`;
   const html = `<div style="font-family:sans-serif;max-width:480px">
   <h2>Milestone reached!</h2>
   <p>You've referred <strong>${params.referralCount}</strong> people.</p>
