@@ -9,7 +9,7 @@ process.env.REQUIRE_EMAIL_VERIFICATION = "false";
 import { describe, it, expect, beforeEach, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { prisma, resetDb, MockMailer } from "./helpers";
-import { signup, streamSignupsForCsv } from "../lib/waitlist";
+import { signup, streamSignupsForCsv, listSignups } from "../lib/waitlist";
 import { GET as exportGet } from "../app/api/admin/export/route";
 import { POST as signupPost } from "../app/api/signup/route";
 import { __resetSignupLimiterForTests } from "../lib/rate-limit";
@@ -45,6 +45,42 @@ describe("admin CSV export streams in batches", () => {
     for await (const r of streamSignupsForCsv(prisma, 2)) rows.push(r);
     expect(rows).toHaveLength(7);
     expect(new Set(rows.map((r) => r.email)).size).toBe(7);
+  });
+
+  it("streamed order matches the legacy newest-first listing, stable across a shared createdAt", async () => {
+    await seed(8);
+
+    // Force several rows to share an identical createdAt so the (createdAt, id)
+    // tiebreaker is exercised at batch boundaries. Pick a subset and stamp them
+    // with one timestamp; this proves the id tiebreaker keeps paging lossless.
+    const all = await prisma.waitlist.findMany({ select: { id: true }, orderBy: { id: "asc" } });
+    const shared = new Date("2026-03-04T05:06:07.000Z");
+    for (const { id } of all.slice(2, 6)) {
+      await prisma.waitlist.update({ where: { id }, data: { createdAt: shared } });
+    }
+
+    // Legacy reference order: the non-streamed listing, newest-first.
+    const total = all.length;
+    const legacy = (await listSignups(prisma, { take: total })).rows.map((r) => r.email);
+
+    // Streamed order, paged in small batches so boundaries land inside the tie.
+    const streamed: string[] = [];
+    for await (const r of streamSignupsForCsv(prisma, 3)) streamed.push(r.email);
+
+    // Exact row-for-row match with the legacy ordering...
+    expect(streamed).toEqual(legacy);
+    // ...lossless and duplicate-free...
+    expect(new Set(streamed).size).toBe(total);
+    // ...and genuinely newest-first by createdAt.
+    const byEmail = new Map(
+      (await prisma.waitlist.findMany({ select: { email: true, createdAt: true } })).map((e) => [
+        e.email,
+        e.createdAt.getTime(),
+      ])
+    );
+    for (let i = 1; i < streamed.length; i++) {
+      expect(byEmail.get(streamed[i - 1])!).toBeGreaterThanOrEqual(byEmail.get(streamed[i])!);
+    }
   });
 
   it("the export route returns a streamed CSV with the header + every row", async () => {

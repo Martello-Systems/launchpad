@@ -490,7 +490,10 @@ export async function listSignups(
 ): Promise<{ total: number; rows: (LeaderboardRow & { createdAt: Date; verified: boolean })[] }> {
   const total = await prisma.waitlist.count();
   const entries = await prisma.waitlist.findMany({
-    orderBy: { createdAt: "desc" },
+    // Deterministic newest-first: the `id` tiebreaker keeps the order stable
+    // when several rows share a createdAt, and matches streamSignupsForCsv so the
+    // admin listing and the CSV export agree row-for-row.
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: opts.take ?? 100,
     skip: opts.skip ?? 0,
   });
@@ -534,8 +537,13 @@ export interface ExportRow {
 /**
  * Stream every signup for the admin CSV export, in batches, so the route never
  * loads the whole table into memory at once. The (bounded) per-referrer verified
- * counts are fetched once up front via a single grouped query; entries are then
- * paged with keyset (cursor) pagination on the primary key.
+ * counts are fetched once up front via a single grouped query.
+ *
+ * ORDER: newest-first, identical to the non-streamed admin listing
+ * (`listSignups`): `ORDER BY createdAt DESC, id DESC`. We page with manual keyset
+ * pagination on the composite `(createdAt, id)` key. createdAt is not unique, so
+ * the `id` tiebreaker is required — without it, rows sharing a createdAt at a
+ * batch boundary could be skipped or duplicated.
  */
 export async function* streamSignupsForCsv(
   prisma: PrismaClient,
@@ -553,12 +561,22 @@ export async function* streamSignupsForCsv(
   const counts = new Map<string, number>();
   for (const g of grouped) if (g.referredById) counts.set(g.referredById, g._count.referredById);
 
-  let cursor: string | undefined;
+  let last: { createdAt: Date; id: string } | undefined;
   for (;;) {
     const batch = await prisma.waitlist.findMany({
       take,
-      ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
-      orderBy: { id: "asc" },
+      // Keyset predicate reproducing "(createdAt, id) < (last.createdAt, last.id)"
+      // under DESC ordering: an older createdAt, or the same createdAt with a
+      // smaller id. Lossless and stable across batch boundaries.
+      where: last
+        ? {
+            OR: [
+              { createdAt: { lt: last.createdAt } },
+              { createdAt: last.createdAt, id: { lt: last.id } },
+            ],
+          }
+        : undefined,
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     });
     if (batch.length === 0) break;
 
@@ -576,6 +594,7 @@ export async function* streamSignupsForCsv(
     }
 
     if (batch.length < take) break;
-    cursor = batch[batch.length - 1].id;
+    const tail = batch[batch.length - 1];
+    last = { createdAt: tail.createdAt, id: tail.id };
   }
 }
