@@ -1,5 +1,5 @@
 {
-  "name": "@martello-systems/launchpad",
+  "name": "launchpad",
   "version": "1.0.0",
   "private": true,
   "description": "Self-hosted viral waitlist in a box: signup, referrals, leaderboard, admin, embeddable widget, email automation.",
