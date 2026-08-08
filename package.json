@@ -14,7 +14,7 @@
   "homepage": "https://github.com/Martello-Systems/launchpad#readme",
   "scripts": {
     "dev": "next dev",
-    "build": "prisma generate && next build",
+    "build": "prisma generate && next build --webpack",
     "start": "next start",
     "lint": "next lint",
     "prisma:generate": "prisma generate",
@@ -25,7 +25,7 @@
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
-    "next": "^15.5.19",
+    "next": "^16.3.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "resend": "^4.0.1"
